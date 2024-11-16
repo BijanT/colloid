@@ -10,8 +10,8 @@
 #include <linux/memory-tiers.h>
 #include <linux/delay.h>
 
-#define FARMEM_NUMA 0
-#define LOCAL_NUMA 1
+#define FARMEM_NUMA 1
+#define LOCAL_NUMA 10
 #define CORE 0
 #define INTERVAL_MS 5000
 

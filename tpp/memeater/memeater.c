@@ -11,8 +11,8 @@
 #include <linux/moduleparam.h>
 #include <linux/memory-tiers.h>
 
-#define FARMEM_NUMA 0
-#define LOCAL_NUMA 1
+#define FARMEM_NUMA 1
+#define LOCAL_NUMA 0
 
 
 static int sizeMiB = 0;
