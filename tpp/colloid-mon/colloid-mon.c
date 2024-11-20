@@ -10,7 +10,7 @@
 #include <linux/delay.h>
 
 //#define SPINPOLL // TODO: configure this
-#define SAMPLE_INTERVAL_MS 500 // Only used if SPINPOLL is not set
+#define SAMPLE_INTERVAL_MS 100 // Only used if SPINPOLL is not set
 #ifdef SPINPOLL
 #define EWMA_EXP 5
 #else
@@ -20,12 +20,12 @@
 extern int colloid_local_lat_gt_remote;
 extern int colloid_nid_of_interest;
 
-#define CORE_MON 10
+#define CORE_MON 9
 #define LOCAL_NUMA 0
 #define WORKER_BUDGET 1000000
 #define LOG_SIZE 10000
-#define MIN_LOCAL_LAT 15
-#define MIN_REMOTE_LAT 30
+#define MIN_LOCAL_LAT 200
+#define MIN_REMOTE_LAT 300
 
 // CHA counters are MSR-based.  
 //   The starting MSR address is 0x0E00 + 0x10*CHA
@@ -42,7 +42,7 @@ extern int colloid_nid_of_interest;
 #define CHA_MSR_PMON_STATUS_BASE 0x0E07L
 #define CHA_MSR_PMON_CTR_BASE 0x0E08L
 
-#define NUM_CHA_BOXES 18 // There are 32 CHA boxes in icelake server. After the first 18 boxes, the couter offsets change.
+#define NUM_CHA_BOXES 10 // There are 32 CHA boxes in icelake server. After the first 18 boxes, the couter offsets change.
 #define NUM_CHA_COUNTERS 4
 #define CHA_OFFSET 0x10
 
@@ -103,21 +103,13 @@ static void poll_cha_init(void) {
         //     return;
         // }
 
-	msr_num = CHA_MSR_PMON_FILTER0_BASE + (CHA_OFFSET * cha);
-	msr_val = 0;
-	ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
-	if (ret != 0) {
-            printk(KERN_ERR "wrmsr FILTER0 failed\n");
-	    return;
-	}
-
-	//msr_num = CHA_MSR_PMON_FILTER0_BASE + (CHA_OFFSET * cha) + 1;
-	//msr_val = ((cha%2==0)?1:2) + (0x182 << 20);
-	//ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
-	//if (ret != 0) {
-        //    printk(KERN_ERR "wrmsr FILTER0 failed\n");
-	//    return;
-	//}
+        msr_num = CHA_MSR_PMON_FILTER0_BASE + (CHA_OFFSET * cha) + 1;
+        msr_val = ((cha%2==0)?1:2) + (0x182 << 20);
+        ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
+        if (ret != 0) {
+            printk(KERN_ERR "wrmsr FILTER1 failed\n");
+            return;
+        }
 
         msr_num = CHA_MSR_PMON_CTL_BASE + (CHA_OFFSET * cha) + 0; // counter 0
         msr_val = 0x404336;//(cha%2==0)?(0x402A36):(0x408A36); // TOR Occupancy, DRd, Miss, local/remote on even/odd CHA boxes
@@ -135,13 +127,13 @@ static void poll_cha_init(void) {
             return;
         }
 
-        msr_num = CHA_MSR_PMON_CTL_BASE + (CHA_OFFSET * cha) + 2; // counter 2
-        msr_val = 0x400000; // CLOCKTICKS
-        ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
-        if(ret != 0) {
-            printk(KERN_ERR "wrmsr COUNTER 2 failed\n");
-            return;
-        }
+        //msr_num = CHA_MSR_PMON_CTL_BASE + (CHA_OFFSET * cha) + 2; // counter 2
+        //msr_val = 0x400000; // CLOCKTICKS
+        //ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
+        //if(ret != 0) {
+        //    printk(KERN_ERR "wrmsr COUNTER 2 failed\n");
+        //    return;
+        //}
     }
     
 }
@@ -173,8 +165,8 @@ void thread_fun_poll_cha(struct work_struct *work) {
     u32 budget = 1;
     #endif
     u64 cum_occ, delta_tsc, cur_occ, cur_inserts;
-    u64 local_occ, local_inserts, local_tsc;
-    u64 remote_occ, remote_inserts, remote_tsc;
+    u64 local_occ, local_inserts;
+    u64 remote_occ, remote_inserts;
     u64 cur_lat_local, cur_lat_remote;
     
     while (budget) {
@@ -189,12 +181,11 @@ void thread_fun_poll_cha(struct work_struct *work) {
         delta_tsc = cur_ctr_tsc[0][0] - prev_ctr_tsc[0][0];
         local_occ = cum_occ;
         cur_occ = (cum_occ << 20)/delta_tsc;
-        cur_inserts = (cur_ctr_val[0][1] - prev_ctr_val[0][1])<<10;
-        local_inserts = cur_inserts >> 10;
-	local_tsc = delta_tsc;
-        WRITE_ONCE(smoothed_occ_local, (cur_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_local)>>EWMA_EXP);
-        WRITE_ONCE(smoothed_inserts_local, (cur_inserts + ((1<<EWMA_EXP) - 1)*smoothed_inserts_local)>>EWMA_EXP);
-        cur_lat_local = (smoothed_inserts_local > 0)?(smoothed_occ_local/smoothed_inserts_local):(MIN_LOCAL_LAT);
+        cur_inserts = (cur_ctr_val[0][1] - prev_ctr_val[0][1]);
+        local_inserts = cur_inserts;
+        WRITE_ONCE(smoothed_occ_local, (local_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_local)>>EWMA_EXP);
+        WRITE_ONCE(smoothed_inserts_local, (local_inserts + ((1<<EWMA_EXP) - 1)*smoothed_inserts_local)>>EWMA_EXP);
+        cur_lat_local = (smoothed_inserts_local > 10000)?(smoothed_occ_local/smoothed_inserts_local):(MIN_LOCAL_LAT);
         cur_lat_local = (cur_lat_local > MIN_LOCAL_LAT)?(cur_lat_local):(MIN_LOCAL_LAT);
         WRITE_ONCE(smoothed_lat_local, cur_lat_local);
         // WRITE_ONCE(smoothed_lat_local, (cur_lat_local*1000 + 31*smoothed_lat_local)/32);
@@ -205,13 +196,12 @@ void thread_fun_poll_cha(struct work_struct *work) {
         cum_occ = cur_ctr_val[1][0] - prev_ctr_val[1][0];
         delta_tsc = cur_ctr_tsc[1][0] - prev_ctr_tsc[1][0];
         cur_occ = (cum_occ << 20)/delta_tsc;
-        cur_inserts = (cur_ctr_val[1][1] - prev_ctr_val[1][1])<<10;
-	remote_occ = cum_occ;
-	remote_inserts = cur_inserts >> 10;
-	remote_tsc = delta_tsc;
-        WRITE_ONCE(smoothed_occ_remote, (cur_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_remote)>>EWMA_EXP);
-        WRITE_ONCE(smoothed_inserts_remote, (cur_inserts + ((1<<EWMA_EXP) - 1)*smoothed_inserts_remote)>>EWMA_EXP);
-        cur_lat_remote = (smoothed_inserts_remote > 0)?(smoothed_occ_remote/smoothed_inserts_remote):(MIN_REMOTE_LAT);
+        cur_inserts = (cur_ctr_val[1][1] - prev_ctr_val[1][1]);
+        remote_occ = cum_occ;
+        remote_inserts = cur_inserts;
+        WRITE_ONCE(smoothed_occ_remote, (remote_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_remote)>>EWMA_EXP);
+        WRITE_ONCE(smoothed_inserts_remote, (remote_inserts + ((1<<EWMA_EXP) - 1)*smoothed_inserts_remote)>>EWMA_EXP);
+        cur_lat_remote = (smoothed_inserts_remote > 10000)?(smoothed_occ_remote/smoothed_inserts_remote):(MIN_REMOTE_LAT);
         WRITE_ONCE(smoothed_lat_remote, (cur_lat_remote > MIN_REMOTE_LAT)?(cur_lat_remote):(MIN_REMOTE_LAT));
         // log_buffer[log_idx].occ_remote = cur_occ;
         // log_buffer[log_idx].inserts_remote = cur_inserts;
@@ -223,13 +213,9 @@ void thread_fun_poll_cha(struct work_struct *work) {
 
         budget--;
         if (first) {
-	    pr_err("cur_lat_local %lld local_occ %lld local_inserts %lld tsc %lld\n",
-			    local_occ / (local_inserts > 0 ? local_inserts : 1),
-			    local_occ, local_inserts, local_tsc);
-	    pr_err("cur_lat_remote %lld remote_occ %lld remote_inserts %lld tsc %lld\n",
-			    remote_occ / (remote_inserts > 0 ? remote_inserts : 1),
-			    remote_occ, remote_inserts, remote_tsc);
-	    first = false;
+            //pr_err("lat local %lld lat remote %lld local_gt_remote %d\n",
+            //    smoothed_lat_local, smoothed_lat_remote, colloid_local_lat_gt_remote);
+            first = false;
         }
     }
     if(!READ_ONCE(terminate_mon)){
