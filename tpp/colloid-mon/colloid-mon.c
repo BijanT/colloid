@@ -242,8 +242,28 @@ static void init_mon_state(void) {
     log_idx = 0;
 }
 
+static ssize_t colloid_latencies_show(struct kobject *kobj,
+        struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "local %llu remote %llu\n",
+            smoothed_lat_local, smoothed_lat_remote);
+}
+static struct kobj_attribute colloid_latency_attr =
+__ATTR(latency, 0444, colloid_latencies_show, NULL);
+
+static struct attribute *colloid_attr[] = {
+    &colloid_latency_attr.attr,
+};
+
+static const struct attribute_group colloid_attr_group = {
+    .attrs = colloid_attr,
+};
+
 static int colloidmon_init(void)
 {
+    struct kobject *colloid_kobj;
+    int err;
+
     poll_cha_queue = alloc_workqueue("poll_cha_queue",  WQ_HIGHPRI | WQ_CPU_INTENSIVE, 0);
     if (!poll_cha_queue) {
         printk(KERN_ERR "Failed to create CHA workqueue\n");
@@ -272,6 +292,19 @@ static int colloidmon_init(void)
     for(i = 0; i < 5; i++) {
         msleep(1000);
         printk("%llu %llu\n", READ_ONCE(smoothed_occ_local), READ_ONCE(smoothed_occ_remote));
+    }
+
+    colloid_kobj = kobject_create_and_add("colloid", kernel_kobj);
+    if (unlikely(!colloid_kobj)) {
+        pr_err("Failed to create colloid kobj\n");
+        return -ENOMEM;
+    }
+
+    err = sysfs_create_group(colloid_kobj, &colloid_attr_group);
+    if (err) {
+        pr_err("Failed to register colloid group\n");
+        kobject_put(colloid_kobj);
+        return err;
     }
     
     return 0;
