@@ -10,7 +10,7 @@
 #include <linux/delay.h>
 
 //#define SPINPOLL // TODO: configure this
-#define SAMPLE_INTERVAL_MS 100 // Only used if SPINPOLL is not set
+#define SAMPLE_INTERVAL_MS 10 // Only used if SPINPOLL is not set
 #ifdef SPINPOLL
 #define EWMA_EXP 5
 #else
