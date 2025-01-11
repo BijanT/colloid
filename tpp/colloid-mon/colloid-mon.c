@@ -24,8 +24,8 @@ extern int colloid_nid_of_interest;
 #define LOCAL_NUMA 0
 #define WORKER_BUDGET 1000000
 #define LOG_SIZE 10000
-#define MIN_LOCAL_LAT 200
-#define MIN_REMOTE_LAT 300
+#define MIN_LOCAL_LAT 280//200
+#define MIN_REMOTE_LAT 410//300
 
 // CHA counters are MSR-based.  
 //   The starting MSR address is 0x0E00 + 0x10*CHA
