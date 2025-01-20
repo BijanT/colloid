@@ -24,8 +24,8 @@ extern int colloid_nid_of_interest;
 #define LOCAL_NUMA 0
 #define WORKER_BUDGET 1000000
 #define LOG_SIZE 10000
-#define MIN_LOCAL_LAT 280//200
-#define MIN_REMOTE_LAT 410//300
+#define MIN_LOCAL_LAT 280
+#define MIN_REMOTE_LAT 410
 
 // CHA counters are MSR-based.  
 //   The starting MSR address is 0x0E00 + 0x10*CHA
@@ -35,16 +35,44 @@ extern int colloid_nid_of_interest;
 //   	Offset 6 is Filter1 -- lots of filter bits, including opcode -- default if unused should be 0x03b, or 0x------33 if using opcode matching
 //   	Offset 7 is Unit Status
 //   	Offsets 8,9,A,B are the Counter count registers
+#ifdef MICRON
+// Register addresses for sapphire rapids
+#define CHA_MSR_PMON_BASE 0x2000L
+#define CHA_MSR_PMON_CTL_BASE 0x2002L
+#define CHA_MSR_PMON_FILTER0_BASE 0x200EL
+#define CHA_MSR_PMON_STATUS_BASE 0x2001L
+#define CHA_MSR_PMON_CTR_BASE 0x2008L
+
+// Register Values
+#define CTL_OCCUPANCY_LOCAL 0x00C816FE00000136
+#define CTL_OCCUPANCY_REMOTE 0x00C8177E00000136
+#define CTL_INSERTS_LOCAL 0x00C816FE00000135
+#define CTL_INSERTS_REMOTE 0x00C8177E00000135
+
+#else
+
+// Register addresses for Haswell
 #define CHA_MSR_PMON_BASE 0x0E00L
 #define CHA_MSR_PMON_CTL_BASE 0x0E01L
 #define CHA_MSR_PMON_FILTER0_BASE 0x0E05L
-// #define CHA_MSR_PMON_FILTER1_BASE 0x0E06L // No FULERT1 on Icelake
+#define CHA_MSR_PMON_FILTER1_BASE 0x0E06L
 #define CHA_MSR_PMON_STATUS_BASE 0x0E07L
 #define CHA_MSR_PMON_CTR_BASE 0x0E08L
+
+// Register values
+#define FILTER1_LOCAL_VAL ((0x182 << 20) + 1)
+#define FILTER1_REMOTE_VAL ((0x182 << 20) + 2)
+#define CTL_OCCUPANCY_LOCAL 0x404336
+#define CTL_OCCUPANCY_REMOTE 0x404336
+#define CTL_INSERTS_LOCAL 0x404335
+#define CTL_INSERTS_REMOTE 0x404335
+
+#endif
 
 #define NUM_CHA_BOXES 10 // There are 32 CHA boxes in icelake server. After the first 18 boxes, the couter offsets change.
 #define NUM_CHA_COUNTERS 4
 #define CHA_OFFSET 0x10
+
 
 u64 smoothed_occ_local, smoothed_inserts_local;
 u64 smoothed_occ_remote, smoothed_inserts_remote;
@@ -95,24 +123,18 @@ static void poll_cha_init(void) {
             return;
         }
 
-        // msr_num = CHA_MSR_PMON_FILTER1_BASE + (0xE * cha); // Filter1
-        // msr_val = (cha%2 == 0)?(0x40432):(0x40431); // Filter DRd of local/remote on even/odd CHA boxes
-        // ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
-        // if(ret != 0) {
-        //     printk(KERN_ERR "wrmsr FILTER1 failed\n");
-        //     return;
-        // }
-
-        msr_num = CHA_MSR_PMON_FILTER0_BASE + (CHA_OFFSET * cha) + 1;
-        msr_val = ((cha%2==0)?1:2) + (0x182 << 20);
+#ifdef CHA_MSR_PMON_FILTER1_BASE
+        msr_num = CHA_MSR_PMON_FILTER1_BASE + (CHA_OFFSET * cha);
+        msr_val = (cha%2==0) ? FILTER1_LOCAL_VAL : FILTER1_REMOTE_VAL;
         ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
         if (ret != 0) {
             printk(KERN_ERR "wrmsr FILTER1 failed\n");
             return;
         }
+#endif
 
         msr_num = CHA_MSR_PMON_CTL_BASE + (CHA_OFFSET * cha) + 0; // counter 0
-        msr_val = 0x404336;//(cha%2==0)?(0x402A36):(0x408A36); // TOR Occupancy, DRd, Miss, local/remote on even/odd CHA boxes
+        msr_val = (cha%2==0) ? CTL_OCCUPANCY_LOCAL : CTL_OCCUPANCY_REMOTE;
         ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
         if(ret != 0) {
             printk(KERN_ERR "wrmsr COUNTER 0 failed\n");
@@ -120,20 +142,12 @@ static void poll_cha_init(void) {
         }
 
         msr_num = CHA_MSR_PMON_CTL_BASE + (CHA_OFFSET * cha) + 1; // counter 1
-        msr_val = 0x404335;//(cha%2==0)?(0x402A35):(0x408A35); // TOR Inserts, DRd, Miss, local/remote on even/odd CHA boxes
+        msr_val = (cha%2==0) ? CTL_INSERTS_LOCAL : CTL_INSERTS_REMOTE;
         ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
         if(ret != 0) {
             printk(KERN_ERR "wrmsr COUNTER 1 failed\n");
             return;
         }
-
-        //msr_num = CHA_MSR_PMON_CTL_BASE + (CHA_OFFSET * cha) + 2; // counter 2
-        //msr_val = 0x400000; // CLOCKTICKS
-        //ret = wrmsr_on_cpu(CORE_MON, msr_num, msr_val & 0xFFFFFFFF, msr_val >> 32);
-        //if(ret != 0) {
-        //    printk(KERN_ERR "wrmsr COUNTER 2 failed\n");
-        //    return;
-        //}
     }
     
 }

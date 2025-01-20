@@ -1,4 +1,5 @@
 obj-m   := colloid-mon.o
+ccflags-$(MICRON) := -DMICRON
 KDIR    := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd) 
   
