@@ -49,6 +49,7 @@ extern int colloid_nid_of_interest;
 #define CTL_INSERTS_LOCAL 0x00C816FE00000135
 #define CTL_INSERTS_REMOTE 0x00C8177E00000135
 
+#define CPU_ARCH "SPR/GNR"
 #else
 
 // Register addresses for Haswell
@@ -67,6 +68,7 @@ extern int colloid_nid_of_interest;
 #define CTL_INSERTS_LOCAL 0x404335
 #define CTL_INSERTS_REMOTE 0x404335
 
+#define CPU_ARCH "HASWELL"
 #endif
 
 #define NUM_CHA_BOXES 10 // There are 32 CHA boxes in icelake server. After the first 18 boxes, the couter offsets change.
@@ -199,7 +201,7 @@ void thread_fun_poll_cha(struct work_struct *work) {
         local_inserts = cur_inserts;
         WRITE_ONCE(smoothed_occ_local, (local_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_local)>>EWMA_EXP);
         WRITE_ONCE(smoothed_inserts_local, (local_inserts + ((1<<EWMA_EXP) - 1)*smoothed_inserts_local)>>EWMA_EXP);
-        cur_lat_local = (smoothed_inserts_local > 10000)?(smoothed_occ_local/smoothed_inserts_local):(MIN_LOCAL_LAT);
+        cur_lat_local = (smoothed_inserts_local > 2000)?(smoothed_occ_local/smoothed_inserts_local):(MIN_LOCAL_LAT);
         cur_lat_local = (cur_lat_local > MIN_LOCAL_LAT)?(cur_lat_local):(MIN_LOCAL_LAT);
         WRITE_ONCE(smoothed_lat_local, cur_lat_local);
         // WRITE_ONCE(smoothed_lat_local, (cur_lat_local*1000 + 31*smoothed_lat_local)/32);
@@ -215,7 +217,7 @@ void thread_fun_poll_cha(struct work_struct *work) {
         remote_inserts = cur_inserts;
         WRITE_ONCE(smoothed_occ_remote, (remote_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_remote)>>EWMA_EXP);
         WRITE_ONCE(smoothed_inserts_remote, (remote_inserts + ((1<<EWMA_EXP) - 1)*smoothed_inserts_remote)>>EWMA_EXP);
-        cur_lat_remote = (smoothed_inserts_remote > 10000)?(smoothed_occ_remote/smoothed_inserts_remote):(MIN_REMOTE_LAT);
+        cur_lat_remote = (smoothed_inserts_remote > 2000)?(smoothed_occ_remote/smoothed_inserts_remote):(MIN_REMOTE_LAT);
         WRITE_ONCE(smoothed_lat_remote, (cur_lat_remote > MIN_REMOTE_LAT)?(cur_lat_remote):(MIN_REMOTE_LAT));
         // log_buffer[log_idx].occ_remote = cur_occ;
         // log_buffer[log_idx].inserts_remote = cur_inserts;
@@ -259,8 +261,10 @@ static void init_mon_state(void) {
 static ssize_t colloid_latencies_show(struct kobject *kobj,
         struct kobj_attribute *attr, char *buf)
 {
-    return sprintf(buf, "local %llu remote %llu\n",
-            smoothed_lat_local, smoothed_lat_remote);
+    return sprintf(buf, "local %llu remote %llu local_inserts %llu remote_inserts %llu arch %s\n",
+            smoothed_lat_local, smoothed_lat_remote,
+	    smoothed_inserts_local, smoothed_inserts_remote,
+	    CPU_ARCH);
 }
 static struct kobj_attribute colloid_latency_attr =
 __ATTR(latency, 0444, colloid_latencies_show, NULL);
