@@ -44,10 +44,10 @@ extern int colloid_nid_of_interest;
 #define CHA_MSR_PMON_CTR_BASE 0x2008L
 
 // Register Values
-#define CTL_OCCUPANCY_LOCAL 0x00C816FE00000136
-#define CTL_OCCUPANCY_REMOTE 0x00C8177E00000136
-#define CTL_INSERTS_LOCAL 0x00C816FE00000135
-#define CTL_INSERTS_REMOTE 0x00C8177E00000135
+#define CTL_OCCUPANCY_LOCAL 0x00C8168600000136 // IA_MISS_DRD_LOCAL_DDR
+#define CTL_OCCUPANCY_REMOTE 0x00C816FE00000136 // IA_MISS_DRD_LOCAL (Subtract this by above to get CXL)
+#define CTL_INSERTS_LOCAL 0x00C8168600000135 // IA_MISS_DRD_LOCAL_DDR
+#define CTL_INSERTS_REMOTE 0x00C816FE00000135 // IA_MISS_DRD_LOCAL (Subtract this by above to get CXL)
 
 #define CPU_ARCH "SPR/GNR"
 #else
@@ -209,10 +209,18 @@ void thread_fun_poll_cha(struct work_struct *work) {
         // log_buffer[log_idx].occ_local = cur_occ;
         // log_buffer[log_idx].inserts_local = cur_inserts;
 
+#ifdef MICRON
+        cum_occ = (cur_ctr_val[1][0] - prev_ctr_val[1][0]) - local_occ;
+#else
         cum_occ = cur_ctr_val[1][0] - prev_ctr_val[1][0];
+#endif
         delta_tsc = cur_ctr_tsc[1][0] - prev_ctr_tsc[1][0];
         cur_occ = (cum_occ << 20)/delta_tsc;
+#ifdef MICRON
+        cur_inserts = (cur_ctr_val[1][1] - prev_ctr_val[1][1]) - local_inserts;
+#else
         cur_inserts = (cur_ctr_val[1][1] - prev_ctr_val[1][1]);
+#endif
         remote_occ = cum_occ;
         remote_inserts = cur_inserts;
         WRITE_ONCE(smoothed_occ_remote, (remote_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_remote)>>EWMA_EXP);
