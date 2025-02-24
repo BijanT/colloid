@@ -50,6 +50,8 @@ extern int colloid_nid_of_interest;
 #define CTL_INSERTS_REMOTE 0x00C8177E00000135
 
 #define CPU_ARCH "SPR/GNR"
+#define INSERT_CUTOFF 2000
+#define NUM_CHA_BOXES 60
 #else
 
 // Register addresses for Haswell
@@ -69,9 +71,10 @@ extern int colloid_nid_of_interest;
 #define CTL_INSERTS_REMOTE 0x404335
 
 #define CPU_ARCH "HASWELL"
+#define INSERT_CUTOFF 10000
+#define NUM_CHA_BOXES 10 // There are 32 CHA boxes in icelake server. After the first 18 boxes, the couter offsets change.
 #endif
 
-#define NUM_CHA_BOXES 10 // There are 32 CHA boxes in icelake server. After the first 18 boxes, the couter offsets change.
 #define NUM_CHA_COUNTERS 4
 #define CHA_OFFSET 0x10
 
@@ -187,40 +190,39 @@ void thread_fun_poll_cha(struct work_struct *work) {
     
     while (budget) {
         // Sample counters and update state
-        // TODO: For starters using CHA0 for local and CHA1 for remote
-        sample_cha_ctr(0, 0); // CHA0 occupancy
-        sample_cha_ctr(0, 1); // CHA0 inserts
-        sample_cha_ctr(1, 0);
-        sample_cha_ctr(1, 1);
+	for (int i = 0; i < NUM_CHA_BOXES; i++) {
+            sample_cha_ctr(i, 0); // CHAi occupancy
+            sample_cha_ctr(i, 1); // CHAi inserts
+        }
 
-        cum_occ = cur_ctr_val[0][0] - prev_ctr_val[0][0];
+        cum_occ = cur_inserts = 0;
+        for (int i = 0; i < NUM_CHA_BOXES; i += 2) {
+            cum_occ += cur_ctr_val[i][0] - prev_ctr_val[i][0];
+            cur_inserts += (cur_ctr_val[i][1] - prev_ctr_val[i][1]);
+        }
         delta_tsc = cur_ctr_tsc[0][0] - prev_ctr_tsc[0][0];
         local_occ = cum_occ;
         cur_occ = (cum_occ << 20)/delta_tsc;
-        cur_inserts = (cur_ctr_val[0][1] - prev_ctr_val[0][1]);
         local_inserts = cur_inserts;
         WRITE_ONCE(smoothed_occ_local, (local_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_local)>>EWMA_EXP);
         WRITE_ONCE(smoothed_inserts_local, (local_inserts + ((1<<EWMA_EXP) - 1)*smoothed_inserts_local)>>EWMA_EXP);
-        cur_lat_local = (smoothed_inserts_local > 2000)?(smoothed_occ_local/smoothed_inserts_local):(MIN_LOCAL_LAT);
+        cur_lat_local = (smoothed_inserts_local > INSERT_CUTOFF)?(smoothed_occ_local/smoothed_inserts_local):(MIN_LOCAL_LAT);
         cur_lat_local = (cur_lat_local > MIN_LOCAL_LAT)?(cur_lat_local):(MIN_LOCAL_LAT);
         WRITE_ONCE(smoothed_lat_local, cur_lat_local);
-        // WRITE_ONCE(smoothed_lat_local, (cur_lat_local*1000 + 31*smoothed_lat_local)/32);
-        // log_buffer[log_idx].tsc = cur_ctr_tsc[0][0];
-        // log_buffer[log_idx].occ_local = cur_occ;
-        // log_buffer[log_idx].inserts_local = cur_inserts;
 
-        cum_occ = cur_ctr_val[1][0] - prev_ctr_val[1][0];
+        cum_occ = cur_inserts = 0;
+        for (int i = 1; i < NUM_CHA_BOXES; i += 2) {
+            cum_occ += cur_ctr_val[i][0] - prev_ctr_val[i][0];
+            cur_inserts += (cur_ctr_val[i][1] - prev_ctr_val[i][1]);
+        }
         delta_tsc = cur_ctr_tsc[1][0] - prev_ctr_tsc[1][0];
         cur_occ = (cum_occ << 20)/delta_tsc;
-        cur_inserts = (cur_ctr_val[1][1] - prev_ctr_val[1][1]);
         remote_occ = cum_occ;
         remote_inserts = cur_inserts;
         WRITE_ONCE(smoothed_occ_remote, (remote_occ + ((1<<EWMA_EXP) - 1)*smoothed_occ_remote)>>EWMA_EXP);
         WRITE_ONCE(smoothed_inserts_remote, (remote_inserts + ((1<<EWMA_EXP) - 1)*smoothed_inserts_remote)>>EWMA_EXP);
-        cur_lat_remote = (smoothed_inserts_remote > 2000)?(smoothed_occ_remote/smoothed_inserts_remote):(MIN_REMOTE_LAT);
+        cur_lat_remote = (smoothed_inserts_remote > INSERT_CUTOFF)?(smoothed_occ_remote/smoothed_inserts_remote):(MIN_REMOTE_LAT);
         WRITE_ONCE(smoothed_lat_remote, (cur_lat_remote > MIN_REMOTE_LAT)?(cur_lat_remote):(MIN_REMOTE_LAT));
-        // log_buffer[log_idx].occ_remote = cur_occ;
-        // log_buffer[log_idx].inserts_remote = cur_inserts;
         
         // WRITE_ONCE(colloid_local_lat_gt_remote, (smoothed_occ_local > smoothed_occ_remote));
         WRITE_ONCE(colloid_local_lat_gt_remote, (smoothed_lat_local > smoothed_lat_remote));
