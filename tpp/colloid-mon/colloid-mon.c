@@ -217,7 +217,10 @@ void thread_fun_poll_cha(struct work_struct *work) {
         delta_tsc = cur_ctr_tsc[1][0] - prev_ctr_tsc[1][0];
         cur_occ = (cum_occ << 20)/delta_tsc;
 #ifdef MICRON
-        cur_inserts = (cur_ctr_val[1][1] - prev_ctr_val[1][1]) - local_inserts;
+        if ((cur_ctr_val[1][1] - prev_ctr_val[1][1]) > local_inserts)
+            cur_inserts = (cur_ctr_val[1][1] - prev_ctr_val[1][1]) - local_inserts;
+        else
+            cur_inserts = 0;
 #else
         cur_inserts = (cur_ctr_val[1][1] - prev_ctr_val[1][1]);
 #endif
